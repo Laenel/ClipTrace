@@ -112,10 +112,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	case ID_UPDATETITLETEXT: {
 		if (lParam == 0 && wParam == (WPARAM)"V clicked") {
 			SendMessage(g_hTitle, WM_SETTEXT, 0, (LPARAM)L"V was clicked!!");
-			int sokoh = MessageBox(NULL, L"V was clicked", L"It was a long journey but V was finally clicked", MB_OKCANCEL);
-			if (sokoh == MB_OK) {
-				SendMessage(g_hTitle, WM_SETTEXT, 0, (LPARAM)L"SOKOH!!!");
-			}
+			MessageBox(NULL, L"V was clicked", L"It was a long journey but V was finally clicked", MB_OKCANCEL);
 		}
 		break;
 	}
