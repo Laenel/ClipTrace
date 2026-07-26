@@ -148,6 +148,19 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		}
 		break;
 	}
+	case WM_COMMAND: {
+		if (LOWORD(wParam) == ID_LISTBOX && HIWORD(wParam) == LBN_SELCHANGE) {
+			int sel = (int)SendMessage(g_hListBox, LB_GETCURSEL, 0, 0);
+			if (sel >= 0 && sel < (int)g_ListofCT.size()) {
+				std::wstring textClicked = g_ListofCT[sel];
+				CopyToClipboard(hWnd, textClicked);
+				MessageBeep(MB_OK);
+				std::wstring textIndex = L"Text at index" + std::to_wstring(sel) + L" copied.";
+				MessageBox(hWnd, textIndex.c_str(), L"Text Copied", MB_OK);
+			}
+		}
+		break;
+	}
 	case WM_HOTKEY: {
 		if (wParam == ID_HOTKEY) {
 			ShowWindow(hWnd, SW_SHOW);
