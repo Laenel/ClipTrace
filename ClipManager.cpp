@@ -3,10 +3,13 @@
 #include <Windows.h>
 #include "Resource.h"
 #include <string>
+#include <vector>
 
 HWND g_hMainWindow = NULL;
 HWND g_hTitle = NULL;
 HWND g_hListBox = NULL;
+BOOL g_ignoreNextCopy = FALSE;
+std::vector<std::wstring> g_ListofCT;
 
 HICON hIconLg = (HICON)LoadImage(
 	GetModuleHandle(NULL),
@@ -33,6 +36,35 @@ HFONT h1Font = CreateFont(24, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHA
 #define ID_TITLE 1002
 #define ID_UPDATETITLETEXT (WM_USER + 5)
 #define ID_HOTKEY 2
+
+void CopyToClipboard(HWND hWnd, std::wstring& text) {
+	if (!OpenClipboard(hWnd)) return;
+	EmptyClipboard();
+	size_t size = (text.size() + 1) * (sizeof(wchar_t));
+	HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size);
+	if (hMem) {
+		memcpy(GlobalLock(hMem), text.c_str(), size);
+		GlobalUnlock(hMem);
+		g_ignoreNextCopy = TRUE;
+		SetClipboardData(CF_UNICODETEXT, hMem);
+	}
+	CloseClipboard();
+}
+
+std::wstring GetClipboardText(HWND hWnd) {
+	std::wstring text = L"";
+	if (!OpenClipboard(hWnd)) return text;
+	HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+	if (hData) {
+		wchar_t* psz_text = static_cast<wchar_t*>(GlobalLock(hData));
+		if (psz_text) {
+			text = psz_text;
+			GlobalUnlock(hData);
+		}
+		CloseClipboard();
+	}
+	return text;
+}
 
 void CreateTrayIcon(HWND hWnd) {
 	NOTIFYICONDATA nid = { sizeof(nid) };
@@ -65,7 +97,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			hWnd, (HMENU)ID_LISTBOX, GetModuleHandle(NULL), NULL
 		);
 		CreateTrayIcon(hWnd);
-
+		AddClipboardFormatListener(hWnd);
 		SendMessage(g_hTitle, WM_SETFONT, (WPARAM)h1Font, TRUE);
 		SetFocus(hWnd);
 		break;
@@ -100,6 +132,22 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		}
 		break;
 	}
+	case WM_CLIPBOARDUPDATE: {
+		if (g_ignoreNextCopy == TRUE) {
+			g_ignoreNextCopy = FALSE;
+			break;
+		}
+		std::wstring copiedText = GetClipboardText(hWnd);
+		if (!copiedText.empty()) {
+			if (g_ListofCT.empty() || g_ListofCT.front() != copiedText) {
+				g_ListofCT.insert(g_ListofCT.begin(), copiedText);
+				std::wstring displayText = copiedText.substr(0, 40);
+				if (copiedText.size() > 40) displayText += L".....";
+				SendMessage(g_hListBox, LB_INSERTSTRING, 0, (LPARAM)copiedText.c_str());
+			}
+		}
+		break;
+	}
 	case WM_HOTKEY: {
 		if (wParam == ID_HOTKEY) {
 			ShowWindow(hWnd, SW_SHOW);
@@ -119,6 +167,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	case WM_DESTROY: {
 		ShowWindow(hWnd, SW_HIDE);
 		UnregisterHotKey(hWnd, ID_HOTKEY);
+		RemoveClipboardFormatListener(hWnd);
 		PostQuitMessage(0);
 		break;
 	}
