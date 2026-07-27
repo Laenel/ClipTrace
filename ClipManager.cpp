@@ -102,16 +102,6 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		SetFocus(hWnd);
 		break;
 	}
-	case WM_SIZE: {
-		int cx = LOWORD(lParam);
-		int cy = HIWORD(lParam);
-		const int titleLimit = 30;
-		if (g_hListBox && g_hTitle) {
-			MoveWindow(g_hTitle, 0, 0, cx, titleLimit, TRUE);
-			MoveWindow(g_hListBox, 0, titleLimit, cx, max(0, cy - titleLimit), TRUE);
-		}
-		break;
-	}
 	case WM_TRAYICON: {
 		if (lParam == WM_LBUTTONDBLCLK)
 		{
@@ -143,7 +133,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				g_ListofCT.insert(g_ListofCT.begin(), copiedText);
 				std::wstring displayText = copiedText.substr(0, 40);
 				if (copiedText.size() > 40) displayText += L".....";
-				SendMessage(g_hListBox, LB_INSERTSTRING, 0, (LPARAM)copiedText.c_str());
+				SendMessage(g_hListBox, LB_INSERTSTRING, 0, (LPARAM)displayText.c_str());
 			}
 		}
 		break;
@@ -161,6 +151,12 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		}
 		break;
 	}
+	case WM_ACTIVATE: {
+		if (LOWORD(wParam) == WA_INACTIVE) {
+			ShowWindow(hWnd, SW_HIDE);
+		}
+		break;
+	}
 	case WM_HOTKEY: {
 		if (wParam == ID_HOTKEY) {
 			ShowWindow(hWnd, SW_SHOW);
@@ -173,7 +169,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	case ID_UPDATETITLETEXT: {
 		if (lParam == 0 && wParam == (WPARAM)"V clicked") {
 			SendMessage(g_hTitle, WM_SETTEXT, 0, (LPARAM)L"V was clicked!!");
-			MessageBox(NULL, L"V was clicked", L"It was a long journey but V was finally clicked", MB_OKCANCEL);
+			//MessageBox(NULL, L"V was clicked", L"Virtual key V was pressed", MB_OKCANCEL);
 		}
 		break;
 	}
@@ -199,7 +195,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrev, _In_ LPST
 	wc.hIcon = hIconLg;
 	RegisterClass(&wc);
 	g_hMainWindow = CreateWindowEx(
-		0, L"ClipManagerClass", L"Clip Manager", WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_SIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, 800, 600, NULL, NULL, hInstance, NULL
+		0, L"ClipManagerClass", L"Clip Manager", WS_POPUP & WS_BORDER & WS_VISIBLE & ~WS_SIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, 400, 400, NULL, NULL, hInstance, NULL
 	);
 	ShowWindow(g_hMainWindow, SW_SHOW);
 	if (!RegisterHotKey(g_hMainWindow, ID_HOTKEY, MOD_CONTROL | MOD_ALT, 'V')) {
