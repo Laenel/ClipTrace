@@ -42,9 +42,6 @@
     <Image Include="small.ico">
       <Filter>Resource Files</Filter>
     </Image>
-    <Image Include="ClipManager.ico">
-      <Filter>Resource Files</Filter>
-    </Image>
     <Image Include="favicon.ico">
       <Filter>Resource Files</Filter>
     </Image>

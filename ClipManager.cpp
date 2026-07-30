@@ -1,43 +1,51 @@
 #define UNICODE
 #define _UNICODE
-#include <Windows.h>
+
 #include "Resource.h"
+#include <Windows.h>
+#include <CommCtrl.h>
+#include <Pdh.h>
 #include <string>
 #include <vector>
+#pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "pdh.lib")
 
-HWND g_hMainWindow = NULL;
-HWND g_hTitle = NULL;
-HWND g_hListBox = NULL;
-BOOL g_ignoreNextCopy = FALSE;
-std::vector<std::wstring> g_ListofCT;
 
-HICON hIconLg = (HICON)LoadImage(
+#define ID_LISTVIEW 113
+#define WM_TRAYICON (WM_USER + 2)
+#define WM_PASSCHECK (WM_USER + 3)
+#define WM_CONFSEL (WM_USER + 4)
+#define ID_TRAYICON 114
+#define ID_TITLE 115
+#define ID_HK_V 116
+
+HWND g_hMainWnd = NULL;
+HWND g_hListView = NULL;
+HWND g_h1Text = NULL;
+HFONT g_h1Font;
+HFONT g_listFont;
+BOOL g_IgnoreNextCopy = FALSE;
+std::vector<std::wstring> g_hListofCT;
+const int lvStart = 35;
+
+HICON iconLg = (HICON)LoadImage(
 	GetModuleHandle(NULL),
-	MAKEINTRESOURCE(IDI_FAVICON),
+	MAKEINTRESOURCE(IDI_CLIPMANAGER),
 	IMAGE_ICON,
 	GetSystemMetrics(SM_CXICON),
 	GetSystemMetrics(SM_CYICON),
 	LR_DEFAULTCOLOR
 );
-HICON hIconSm = (HICON)LoadImage(
+HICON iconSm = (HICON)LoadImage(
 	GetModuleHandle(NULL),
-	MAKEINTRESOURCE(IDI_FAVICON),
+	MAKEINTRESOURCE(IDI_SMALL),
 	IMAGE_ICON,
 	GetSystemMetrics(SM_CXSMICON),
 	GetSystemMetrics(SM_CYSMICON),
 	LR_DEFAULTCOLOR
 );
 
-HFONT h1Font = CreateFont(24, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Eater");
-
-#define ID_LISTBOX 6267
-#define WM_TRAYICON (WM_USER + 2)
-#define ID_TRAYICON 1006
-#define ID_TITLE 1002
-#define ID_UPDATETITLETEXT (WM_USER + 5)
-#define ID_HOTKEY 2
-
-void CopyToClipboard(HWND hWnd, std::wstring& text) {
+void CopyToClipboard(HWND hWnd, std::wstring text) {
 	if (!OpenClipboard(hWnd)) return;
 	EmptyClipboard();
 	size_t size = (text.size() + 1) * (sizeof(wchar_t));
@@ -45,7 +53,7 @@ void CopyToClipboard(HWND hWnd, std::wstring& text) {
 	if (hMem) {
 		memcpy(GlobalLock(hMem), text.c_str(), size);
 		GlobalUnlock(hMem);
-		g_ignoreNextCopy = TRUE;
+		g_IgnoreNextCopy = TRUE;
 		SetClipboardData(CF_UNICODETEXT, hMem);
 	}
 	CloseClipboard();
@@ -56,98 +64,116 @@ std::wstring GetClipboardText(HWND hWnd) {
 	if (!OpenClipboard(hWnd)) return text;
 	HANDLE hData = GetClipboardData(CF_UNICODETEXT);
 	if (hData) {
-		wchar_t* psz_text = static_cast<wchar_t*>(GlobalLock(hData));
-		if (psz_text) {
-			text = psz_text;
-			GlobalUnlock(hData);
+		wchar_t* pszText = static_cast<wchar_t*>(GlobalLock(hData));
+		if (pszText) {
+			text = pszText;
 		}
-		CloseClipboard();
+		GlobalUnlock(hData);
 	}
+	CloseClipboard();
 	return text;
 }
 
-void CreateTrayIcon(HWND hWnd) {
-	NOTIFYICONDATA nid = { sizeof(nid) };
-	nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+void SetupTrayIcon(HWND hWnd) {
+	NOTIFYICONDATA nid = {};
 	nid.hWnd = hWnd;
+	nid.hIcon = iconSm;
+	nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
 	nid.uID = ID_TRAYICON;
 	nid.uCallbackMessage = WM_TRAYICON;
-	nid.hIcon = hIconSm;
-	lstrcpy(nid.szTip, L"ClipManager");
+	lstrcpy(nid.szTip, L"ClipTrace");
 	Shell_NotifyIcon(NIM_ADD, &nid);
 }
 
-LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+DWORD WINAPI CountThread(LPVOID lpParam) {
+	HWND hWnd = (HWND)lpParam;
+	return 0;
+
+}
+
+DWORD WINAPI ConfirmationWorker(LPVOID lpParam) {
+	int selected = (int)lpParam;
+	if (selected >= 0) {
+		wchar_t buff[60];
+		std::wstring bcktxt = L"";
+		LV_ITEM item = {};
+		item.mask = LVIF_TEXT;
+		item.iItem = selected;
+		item.pszText = buff;
+		item.iSubItem = 0;
+		item.cchTextMax = 60;
+		ListView_GetItem(g_hListView, &item);
+		bcktxt = buff;
+		item.pszText = (LPWSTR)L"Copied \u2714";
+		ListView_SetItem(g_hListView, &item);
+		Sleep(1500);
+		item.pszText = (LPWSTR)bcktxt.c_str();
+		ListView_SetItem(g_hListView, &item);
+	}
+	return 0;
+}
+
+void AddRow(HWND hWnd, std::wstring text) {
+	LVITEM item = {};
+	item.mask = LVIF_TEXT;
+	item.iItem = 0;
+	item.pszText = const_cast<LPWSTR>(text.c_str());
+	ListView_InsertItem(hWnd, &item);
+}
+
+int PointerSizeFont(HWND hWnd, int ps) {
+	UINT dpi = 96;
+	HDC hdc = GetDC(hWnd);
+	if (hdc) {
+		dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+		ReleaseDC(hWnd, hdc);
+	}
+	return -MulDiv(ps, dpi, 72);
+}
+
+HFONT CreateSizeFont(HWND hWnd, int ps, int weight, BOOL italic, LPCWSTR fontFamily) {
+	int height = PointerSizeFont(hWnd, ps);
+	return CreateFont(
+		height, 0, 0, 0, weight, italic, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEVICE_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, fontFamily
+	);
+}
+
+LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	switch (msg)
 	{
 	case WM_CREATE: {
-		RECT rt;
+		RECT rt, rtlv;
 		GetClientRect(hWnd, &rt);
-		const int titleLimit = 30;
-		g_hTitle = CreateWindowEx(
-			0, L"STATIC", L"Clipboard Manager",
-			WS_CHILD | WS_VISIBLE | SS_CENTER,
-			0, 0, rt.right, titleLimit,
-			hWnd, (HMENU)ID_TITLE, GetModuleHandle(NULL), NULL
-			);
-		g_hListBox = CreateWindow(
-			L"LISTBOX", NULL,
-			WS_CHILD | WS_VISIBLE | LBS_NOTIFY | LBS_HASSTRINGS,
-			0, titleLimit, rt.right, max(0, rt.bottom - titleLimit),
-			hWnd, (HMENU)ID_LISTBOX, GetModuleHandle(NULL), NULL
-		);
-		CreateTrayIcon(hWnd);
+		SetupTrayIcon(hWnd);
 		AddClipboardFormatListener(hWnd);
-		SendMessage(g_hTitle, WM_SETFONT, (WPARAM)h1Font, TRUE);
-		SetFocus(hWnd);
+		g_h1Text = CreateWindowEx(
+			0, L"STATIC", L"ClipTrace", WS_CHILD | WS_VISIBLE | SS_CENTER, 0, 0, rt.right, lvStart + 3, hWnd, (HMENU)ID_TITLE, GetModuleHandle(NULL), NULL
+		);
+
+		g_hListView = CreateWindowEx(
+			0, WC_LISTVIEW, NULL, WS_CHILD | LVS_REPORT | LVS_SINGLESEL | LVS_NOCOLUMNHEADER | WS_VISIBLE, 0, lvStart, rt.right, max(0, rt.bottom - lvStart), hWnd, (HMENU)ID_LISTVIEW, GetModuleHandle(NULL), NULL
+		);
+		g_h1Font = CreateSizeFont(hWnd, 22, FW_SEMIBOLD, FALSE, L"Griffy");
+		g_listFont = CreateSizeFont(hWnd, 11, FW_LIGHT, FALSE, L"Playwrite NZ Basic Regular");
+		SendMessage(g_h1Text, WM_SETFONT, (WPARAM)g_h1Font, TRUE);
+		SendMessage(g_hListView, WM_SETFONT, (WPARAM)g_listFont, TRUE);
+		GetClientRect(g_hListView, &rtlv);
+		CreateThread(
+			NULL, 0, CountThread, hWnd, 0, NULL
+		);
+		ListView_SetExtendedListViewStyle(g_hListView, LVS_EX_TWOCLICKACTIVATE | LVS_EX_FULLROWSELECT | LVS_EX_JUSTIFYCOLUMNS);
+		LV_COLUMN col = {};
+		col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+		col.cx = rtlv.right;
+		col.fmt = LVCFMT_CENTER;
+		col.pszText = (LPWSTR)L"";
+		ListView_InsertColumn(g_hListView, 0, &col);
 		break;
+
 	}
 	case WM_TRAYICON: {
-		if (lParam == WM_LBUTTONDBLCLK)
-		{
-			ShowWindow(hWnd, IsWindowVisible(hWnd) ? SW_HIDE : SW_SHOW);
-			SetForegroundWindow(hWnd);
-			SetFocus(hWnd);
-		}
-		break;
-	}
-	case WM_CLOSE: {
-		ShowWindow(hWnd, SW_HIDE);
-		return 0;
-	}
-	case WM_KEYDOWN: {
-		if (wParam == 'V') {
-			SetFocus(hWnd);
-			SendMessage(hWnd, ID_UPDATETITLETEXT, (WPARAM)"V clicked", (LPARAM)0);
-		}
-		break;
-	}
-	case WM_CLIPBOARDUPDATE: {
-		if (g_ignoreNextCopy == TRUE) {
-			g_ignoreNextCopy = FALSE;
-			break;
-		}
-		std::wstring copiedText = GetClipboardText(hWnd);
-		if (!copiedText.empty()) {
-			if (g_ListofCT.empty() || g_ListofCT.front() != copiedText) {
-				g_ListofCT.insert(g_ListofCT.begin(), copiedText);
-				std::wstring displayText = copiedText.substr(0, 40);
-				if (copiedText.size() > 40) displayText += L".....";
-				SendMessage(g_hListBox, LB_INSERTSTRING, 0, (LPARAM)displayText.c_str());
-			}
-		}
-		break;
-	}
-	case WM_COMMAND: {
-		if (LOWORD(wParam) == ID_LISTBOX && HIWORD(wParam) == LBN_SELCHANGE) {
-			int sel = (int)SendMessage(g_hListBox, LB_GETCURSEL, 0, 0);
-			if (sel >= 0 && sel < (int)g_ListofCT.size()) {
-				std::wstring textClicked = g_ListofCT[sel];
-				CopyToClipboard(hWnd, textClicked);
-				MessageBeep(MB_OK);
-				std::wstring textIndex = L"Text at index" + std::to_wstring(sel) + L" copied.";
-				MessageBox(hWnd, textIndex.c_str(), L"Text Copied", MB_OK);
-			}
+		if (lParam == WM_LBUTTONDBLCLK) {
+			ShowWindow(hWnd, IsWindowVisible(hWnd) ? SW_HIDE : (SW_SHOW && SetForegroundWindow(hWnd)));
 		}
 		break;
 	}
@@ -157,26 +183,65 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		}
 		break;
 	}
+	case WM_PASSCHECK: {
+		if (lParam == 0) {
+			double count = (double)wParam;
+			AddRow(g_hListView, std::to_wstring(wParam));
+		}
+		break;
+	}
+	case WM_CLIPBOARDUPDATE: {
+		if (g_IgnoreNextCopy == TRUE) {
+			g_IgnoreNextCopy = FALSE;
+			break;
+		}
+		std::wstring copiedText = GetClipboardText(hWnd);
+		if (!copiedText.empty()) {
+			if (g_hListofCT.empty() || g_hListofCT.front() != copiedText) {
+				std::wstring displayText = copiedText.substr(0, 40);
+				if (copiedText.size() > 40) displayText += L"...";
+				AddRow(g_hListView, displayText);
+				g_hListofCT.insert(g_hListofCT.begin(), copiedText);
+			}
+		}
+		break;
+	}
+	case WM_NOTIFY: {
+		LPNMHDR hdr = (LPNMHDR)lParam;
+		if (hdr->idFrom == ID_LISTVIEW && hdr->code == NM_DBLCLK) {
+			int sel = ListView_GetNextItem(g_hListView, -1, LVNI_SELECTED);
+			if (sel >= 0 && sel < (int)g_hListofCT.size()) {
+				CopyToClipboard(hWnd, g_hListofCT[sel].c_str());
+				MessageBeep(MB_OK);
+				SendMessage(hWnd, WM_CONFSEL, (WPARAM)sel, 0x006725);
+			}
+		}
+		break;
+	}
 	case WM_HOTKEY: {
-		if (wParam == ID_HOTKEY) {
+		if (wParam == ID_HK_V) {
 			ShowWindow(hWnd, SW_SHOW);
 			SetForegroundWindow(hWnd);
 			SetFocus(hWnd);
-			SendMessage(hWnd, ID_UPDATETITLETEXT, (WPARAM)"V clicked", 0);
 		}
 		break;
 	}
-	case ID_UPDATETITLETEXT: {
-		if (lParam == 0 && wParam == (WPARAM)"V clicked") {
-			SendMessage(g_hTitle, WM_SETTEXT, 0, (LPARAM)L"V was clicked!!");
-			//MessageBox(NULL, L"V was clicked", L"Virtual key V was pressed", MB_OKCANCEL);
+	case WM_CONFSEL: {
+		if (lParam == 0x006725) {
+			CreateThread(NULL, 0, ConfirmationWorker, (LPVOID)wParam, NULL, 0);
 		}
 		break;
+	}
+	case WM_CLOSE: {
+		ShowWindow(hWnd, SW_HIDE);
+		return 0;
 	}
 	case WM_DESTROY: {
 		ShowWindow(hWnd, SW_HIDE);
-		UnregisterHotKey(hWnd, ID_HOTKEY);
 		RemoveClipboardFormatListener(hWnd);
+		UnregisterHotKey(hWnd, ID_HK_V);
+		DeleteObject(g_h1Font);
+		DeleteObject(g_listFont);
 		PostQuitMessage(0);
 		break;
 	}
@@ -188,17 +253,19 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrev, _In_ LPSTR lpCmd, _In_ int nCmdShow) {
 	WNDCLASS wc = { 0 };
-	wc.lpfnWndProc = WindowProc;
+	wc.lpfnWndProc = WndProc;
 	wc.hInstance = hInstance;
+	wc.lpszClassName = L"ClipTraceClass";
+	wc.hIcon = iconLg;
 	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 2);
-	wc.lpszClassName = L"ClipManagerClass";
-	wc.hIcon = hIconLg;
+	INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_LISTVIEW_CLASSES };
+	InitCommonControlsEx(&icex);
 	RegisterClass(&wc);
-	g_hMainWindow = CreateWindowEx(
-		0, L"ClipManagerClass", L"Clip Manager", WS_POPUP & WS_BORDER & WS_VISIBLE & ~WS_SIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, 400, 400, NULL, NULL, hInstance, NULL
+	g_hMainWnd = CreateWindowEx(
+		0, L"ClipTraceClass", L"ClipTrace", WS_POPUP & WS_BORDER, CW_USEDEFAULT, CW_USEDEFAULT, 250, 250, NULL, NULL, hInstance, NULL
 	);
-	ShowWindow(g_hMainWindow, SW_SHOW);
-	if (!RegisterHotKey(g_hMainWindow, ID_HOTKEY, MOD_CONTROL | MOD_ALT, 'V')) {
+	ShowWindow(g_hMainWnd, SW_SHOW);
+	if (!RegisterHotKey(g_hMainWnd, ID_HK_V, MOD_CONTROL | MOD_ALT, 'V')) {
 		DWORD err = GetLastError();
 	}
 	MSG msg;

@@ -151,7 +151,6 @@
     <ResourceCompile Include="ClipManager.rc" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="ClipManager.ico" />
     <Image Include="favicon.ico" />
     <Image Include="small.ico" />
   </ItemGroup>
