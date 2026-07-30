@@ -7,8 +7,10 @@
 #include <Pdh.h>
 #include <string>
 #include <vector>
+#include <dwmapi.h>
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "pdh.lib")
+#pragma comment(lib, "dwmapi.lib")
 
 
 #define ID_LISTVIEW 113
@@ -16,8 +18,10 @@
 #define WM_PASSCHECK (WM_USER + 3)
 #define WM_CONFSEL (WM_USER + 4)
 #define ID_TRAYICON 114
-#define ID_TITLE 115
-#define ID_HK_V 116
+#define ID_TRAYOPEN 115
+#define ID_TRAYQUIT 116
+#define ID_TITLE 117
+#define ID_HK_V 118
 
 HWND g_hMainWnd = NULL;
 HWND g_hListView = NULL;
@@ -137,6 +141,18 @@ HFONT CreateSizeFont(HWND hWnd, int ps, int weight, BOOL italic, LPCWSTR fontFam
 		height, 0, 0, 0, weight, italic, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEVICE_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, fontFamily
 	);
 }
+void EnableMica(HWND hWnd) {
+	int backdrop = DWMSBT_TRANSIENTWINDOW;
+	DwmSetWindowAttribute(
+		hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop)
+	);
+}
+void EnableDkMd(HWND hWnd) {
+	BOOL darkMode = TRUE;
+	DwmSetWindowAttribute(
+		hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode)
+	);
+}
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	switch (msg)
@@ -174,6 +190,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	case WM_TRAYICON: {
 		if (lParam == WM_LBUTTONDBLCLK) {
 			ShowWindow(hWnd, IsWindowVisible(hWnd) ? SW_HIDE : (SW_SHOW && SetForegroundWindow(hWnd)));
+		}
+		else if (lParam == WM_RBUTTONUP)
+		{
+			HMENU ctxMenu = CreatePopupMenu();
+			AppendMenu(ctxMenu, MF_STRING, ID_TRAYOPEN, L"Open App");
+			AppendMenu(ctxMenu, MF_STRING, ID_TRAYQUIT, L"Quit");
+			POINT pt;
+			GetCursorPos(&pt);
+			SetForegroundWindow(hWnd);
+			TrackPopupMenu(ctxMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hWnd, NULL);
 		}
 		break;
 	}
@@ -232,6 +258,32 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		}
 		break;
 	}
+	case WM_COMMAND: {
+		switch (LOWORD(wParam))
+		{
+		case ID_TRAYOPEN: {
+			ShowWindow(hWnd, SW_SHOW);
+			SetForegroundWindow(hWnd);
+			SetFocus(hWnd);
+			break;
+		}
+		case ID_TRAYQUIT: {
+			ShowWindow(hWnd, SW_HIDE);
+			RemoveClipboardFormatListener(hWnd);
+			UnregisterHotKey(hWnd, ID_HK_V);
+			DeleteObject(g_h1Font);
+			DeleteObject(g_listFont);
+			PostQuitMessage(0);
+			break;
+		}
+		default:
+			break;
+		}
+		break;
+	}
+	case WM_ERASEBKGND: {
+		return 1;
+	}
 	case WM_CLOSE: {
 		ShowWindow(hWnd, SW_HIDE);
 		return 0;
@@ -257,13 +309,14 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrev, _In_ LPST
 	wc.hInstance = hInstance;
 	wc.lpszClassName = L"ClipTraceClass";
 	wc.hIcon = iconLg;
-	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 2);
 	INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_LISTVIEW_CLASSES };
 	InitCommonControlsEx(&icex);
 	RegisterClass(&wc);
 	g_hMainWnd = CreateWindowEx(
 		0, L"ClipTraceClass", L"ClipTrace", WS_POPUP & WS_BORDER, CW_USEDEFAULT, CW_USEDEFAULT, 250, 250, NULL, NULL, hInstance, NULL
 	);
+	EnableMica(g_hMainWnd);
+	EnableDkMd(g_hMainWnd);
 	ShowWindow(g_hMainWnd, SW_SHOW);
 	if (!RegisterHotKey(g_hMainWnd, ID_HK_V, MOD_CONTROL | MOD_ALT, 'V')) {
 		DWORD err = GetLastError();
